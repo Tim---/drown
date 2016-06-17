@@ -4,6 +4,26 @@ Implementation of the special DROWN attack on SSL2
 Note : this does not cover the general DROWN attack.
 
 
+## Installation
+
+First, we need a version of OpenSSL with SSLv2 enabled. Also, if we want to make some simulations, we need a vulnerable OpenSSL (<= 1.0.1l).
+We will compile and install it on the folder /path/to/prefix :
+
+    wget https://www.openssl.org/source/openssl-1.0.1l.tar.gz
+    tar xzf openssl-1.0.1l.tar.gz
+    cd openssl-1.0.1l
+    ./config enable-ssl2 enable-weak-ciphers --openssldir=/path/to/prefix
+    make && make install
+
+Now let's compile the exploit :
+
+    git clone https://github.com/Tim---/drown
+    SSL_PREFIX=/path/to/prefix make
+
+To decrypt an encrypted pre-master secret c, using the public key (n, e) of the server at the address host:port, we will use the following command :
+
+    ./drown host:port c n e
+
 ## Passive attack
 
 In this type of attack, we can see the traffic between a server and a client using TLS.
@@ -15,17 +35,11 @@ In this case, we can decrypt some TLS sessions if :
 
 ## Simulation
 
-To simulate this scenario, we must install an old version of OpenSSL :
+To simulate this scenario, want to record some TLS handshakes between a client and a server.
+We will use the old version of OpenSSL we have installed to create a server, and initiate a lot of sessions.
+We will capture the handshakes with tshark.
 
-    wget https://www.openssl.org/source/openssl-1.0.1l.tar.gz
-    tar xzf openssl-1.0.1l.tar.gz
-    cd openssl-1.0.1l
-    ./config enable-ssl2 enable-weak-ciphers --openssldir=/path/to/prefix
-    make && make install
     cd /path/to/prefix
-
-Now, we want to record some TLS sessions. We will create a server, launch tshark to capture the packets, and initiate a lot of sessions.
-
     ./bin/openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 123
     ./bin/openssl s_server -cert cert.pem -key key.pem -accept 4433 -www
     tshark -i lo -w handshakes.cap
