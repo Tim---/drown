@@ -1,7 +1,7 @@
 #ifndef DECRYPT_H
 #define DECRYPT_H
 
-#include "drown.h"
+#include "utils.h"
 
 void decrypt(drown_ctx *dctx);
 

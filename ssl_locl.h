@@ -29,4 +29,6 @@ int     ssl2_new(SSL *s);
 
 int ssl_get_new_session(SSL *s, int session);
 
+const SSL_METHOD *SSLv2_method(void);
+
 #endif

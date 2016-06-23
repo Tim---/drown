@@ -1,5 +1,5 @@
-#ifndef DROWN_H
-#define DROWN_H
+#ifndef UTILS_H
+#define UTILS_H
 
 #include <openssl/bn.h>
 
@@ -25,6 +25,11 @@ typedef struct
 
 void drown_new(drown_ctx * dctx);
 void drown_free(drown_ctx * dctx);
+
+void read_public_key(drown_ctx * dctx, char *filename);
+void dump_wireshark(char *c_hex, BIGNUM *mt);
+
+
 
 #define SSL_ASSERT(cond) if(!(cond)) { ERR_print_errors_fp(stderr); exit(EXIT_FAILURE); }
 #define MY_ASSERT(cond, error) if(!(cond)) { fprintf(stderr, "ERROR : " error "\n"); exit(EXIT_FAILURE); }

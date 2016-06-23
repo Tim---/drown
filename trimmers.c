@@ -4,7 +4,7 @@
 #include <openssl/bn.h>
 #include <assert.h>
 #include <string.h>
-#include "drown.h"
+#include "utils.h"
 #include "trimmers.h"
 #include "oracle.h"
 
