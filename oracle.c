@@ -104,7 +104,7 @@ void send_client_hello(SSL *s)
 }
 
 
-void recv_server_hello(SSL *s)
+int recv_server_hello(SSL *s)
 {
     unsigned int n;
     oracle_ssl2_do_read(s);
@@ -133,7 +133,9 @@ void recv_server_hello(SSL *s)
 
     // CIPHER-SPECS-LENGTH
     n2s(p, n);
-    assert(n > 0);
+    if(n == 0)
+        // cipher not supported ?
+        return 0;
 
     // CIPHER-SPECS
     s->session->cipher = s->method->get_cipher_by_char(d);
@@ -147,6 +149,8 @@ void recv_server_hello(SSL *s)
     // CONNECTION-ID
     memcpy(s->s2->conn_id, d, n);
     d += n;
+
+    return 1;
 }
 
 void send_client_master_key(SSL *s, unsigned char *master_key, unsigned int clear_key_length, unsigned char *encrypted_key, unsigned int encrypted_key_length)
@@ -307,7 +311,8 @@ SSL * oracle_query(char *hostport, unsigned int keysize, unsigned char *clear_ke
     // We are connected, great !
     // Now send client hello
     send_client_hello(ssl);
-    recv_server_hello(ssl);
+    if(!recv_server_hello(ssl))
+        return NULL;
     send_client_master_key(ssl, clear_key, clear_key_length, encrypted_key, encrypted_key_length);
     // Now we can "start" the encryption
     ssl->s2->clear_text=0;
@@ -330,6 +335,8 @@ int run_oracle_valid(char *hostport, unsigned int keysize, unsigned char *encryp
     memset(clear_key, 0, keysize);
 
     SSL *ssl = oracle_query(hostport, keysize, clear_key, sizeof(clear_key), encrypted_key, encrypted_key_length);
+    if(ssl == NULL)
+        return 0;
 
     int res = oracle_check_valid(ssl);
 
