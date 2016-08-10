@@ -55,15 +55,16 @@ def handshakeProxy(c_conn, s_conn, oracle):
 
 
     # TODO : this part is optional
-    # CERTIFICATE REQUEST   S -> C
-    for result in c_conn._getMsg(ContentType.handshake,
-                           HandshakeType.certificate_request):
-        if result in (0,1): yield result
-        else: break
-    certificate_request = result
+    if 0:
+        # CERTIFICATE REQUEST   S -> C
+        for result in c_conn._getMsg(ContentType.handshake,
+                               HandshakeType.certificate_request):
+            if result in (0,1): yield result
+            else: break
+        certificate_request = result
 
-    for result in s_conn._sendMsg(certificate_request):
-        yield result
+        for result in s_conn._sendMsg(certificate_request):
+            yield result
 
 
     # SERVER HELLO DONE     S -> C
@@ -77,16 +78,17 @@ def handshakeProxy(c_conn, s_conn, oracle):
         yield result
 
     # TODO : this part is optional
-    # CERTIFICATE           C -> S
-    for result in s_conn._getMsg(ContentType.handshake,
-                           HandshakeType.certificate,
-                           serverHello.certificate_type): # FIXME : we should allow anything ?
-        if result in (0,1): yield result
-        else: break
-    clientCertificate = result
+    if 0:
+        # CERTIFICATE           C -> S
+        for result in s_conn._getMsg(ContentType.handshake,
+                               HandshakeType.certificate,
+                               serverHello.certificate_type): # FIXME : we should allow anything ?
+            if result in (0,1): yield result
+            else: break
+        clientCertificate = result
 
-    for result in c_conn._sendMsg(clientCertificate):
-        yield result
+        for result in c_conn._sendMsg(clientCertificate):
+            yield result
 
 
     # CLIENT KEY EXCHANGE   C -> S
