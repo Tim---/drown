@@ -22,7 +22,7 @@ def handshakeProxy(c_conn, s_conn, oracle):
         else: break
     clientHello = result
 
-    c_conn.version = (3, 3) # TODO : Hardcoded version ?
+    c_conn.version = (3, 1) # TODO : Hardcoded version ?
 
     for result in c_conn._sendMsg(clientHello):
         yield result
